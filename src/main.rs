@@ -149,6 +149,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Strip trailing digits from a command name, returning the base command and
+/// the digits as a separate string. This matches the official pprof behavior
+/// where e.g. "top20" is equivalent to "top 20".
+fn split_trailing_digits(cmd: &str) -> (&str, Option<&str>) {
+    let digit_start = cmd.len() - cmd.bytes().rev().take_while(|b| b.is_ascii_digit()).count();
+    if digit_start > 0 && digit_start < cmd.len() {
+        (&cmd[..digit_start], Some(&cmd[digit_start..]))
+    } else {
+        (cmd, None)
+    }
+}
+
+fn parse_command_line<'a>(parts: &[&'a str]) -> (&'a str, Vec<&'a str>) {
+    let cmd_name = parts.first().map(|s| *s).unwrap_or("");
+    let (base, digits) = split_trailing_digits(cmd_name);
+    let mut args: Vec<&'a str> = Vec::new();
+    if let Some(d) = digits {
+        args.push(d);
+    }
+    args.extend_from_slice(&parts[1..]);
+    (base, args)
+}
+
 fn run_command(data: &ProfileData, cmd: &str) {
     // Support multiple commands separated by semicolons
     for single_cmd in cmd.split(';') {
@@ -158,15 +181,15 @@ fn run_command(data: &ProfileData, cmd: &str) {
         }
 
         let parts: Vec<&str> = single_cmd.split_whitespace().collect();
-        let cmd_name = parts.first().map(|s| *s).unwrap_or("");
+        let (cmd_name, args) = parse_command_line(&parts);
 
         match cmd_name {
-            "top" => cmd_top(data, &parts[1..]),
-            "list" => cmd_list(data, &parts[1..]),
+            "top" => cmd_top(data, &args),
+            "list" => cmd_list(data, &args),
             "web" => cmd_web(data),
             "help" | "h" | "?" => print_help(),
             "" => {}
-            _ => eprintln!("Unknown command: {}", cmd_name),
+            _ => eprintln!("Unknown command: {}", parts[0]),
         }
     }
 }
@@ -380,15 +403,15 @@ fn run_repl(data: &ProfileData) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = rl.add_history_entry(line);
 
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                let cmd = parts.first().map(|s| *s).unwrap_or("");
+                let (cmd, args) = parse_command_line(&parts);
 
                 match cmd {
                     "quit" | "exit" | "q" => break,
                     "help" | "h" | "?" => print_help(),
-                    "top" => cmd_top(data, &parts[1..]),
-                    "list" => cmd_list(data, &parts[1..]),
+                    "top" => cmd_top(data, &args),
+                    "list" => cmd_list(data, &args),
                     "web" => cmd_web(data),
-                    _ => println!("Unknown command: {}. Type 'help' for help.", cmd),
+                    _ => println!("Unknown command: {}. Type 'help' for help.", parts[0]),
                 }
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
